@@ -2,8 +2,8 @@ from copy import deepcopy
 from scipy.linalg import block_diag
 import numpy as np
 
-from tests import run_tests
-from logging import Logger
+from iekf_tests import run_tests
+from iekf_logging import Logger
 
 
 def so3_wedge(w):
