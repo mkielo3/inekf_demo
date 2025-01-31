@@ -242,7 +242,8 @@ class LandmarkManager:
 			estimated_landmarks[ld_id] = startIndex
 
 			# Update state and covariance
-			return X_aug, P_aug
+		
+		return X_aug, P_aug
 
 
 # Create all covariance matrices, with noise values to match C++
