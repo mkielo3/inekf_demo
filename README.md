@@ -4,7 +4,7 @@ Single file implementation of the Landmark example of https://github.com/RossHar
 
 # Definitions
 
-Equation and section pointers to: ![Contact-Aided Invariant Extended Kalman Filtering for Robot State Estimation](https://arxiv.org/pdf/1904.09251)
+Equation and section pointers to: [Contact-Aided Invariant Extended Kalman Filtering for Robot State Estimation](https://arxiv.org/pdf/1904.09251)
 
 # State Definitions
 ![](imgs/definitions.png)
