@@ -16,7 +16,7 @@ def so3_wedge(w):
 
 
 def so3_Exp(xi, _small_angle_tol = 1e-10):
-	"""	map from Lie algebra so(3) to Lie group SO(3) """
+	""" map from Lie algebra so(3) to Lie group SO(3) """
 	phi = np.array(xi).ravel()
 	angle = np.sqrt(phi.dot(phi))
 
@@ -39,42 +39,42 @@ def so3_Exp(xi, _small_angle_tol = 1e-10):
 
 
 def sek3_Exp(v, small_angle_tol=1e-10):
-    """ map from Lie algebra se_k(3) to Lie group SE_K(3)"""
-    K = int((v.shape[0] - 3) / 3)  # Number of landmarks
-    X = np.eye(3 + K)
-    
-    # Extract and compute rotation part using existing so3_Exp
-    w = v[:3]
-    R = so3_Exp(w, small_angle_tol)
-    X[:3, :3] = R
+	""" map from Lie algebra se_k(3) to Lie group SE_K(3)"""
+	K = int((v.shape[0] - 3) / 3)  # Number of landmarks
+	X = np.eye(3 + K)
+	
+	# Extract and compute rotation part using existing so3_Exp
+	w = v[:3]
+	R = so3_Exp(w, small_angle_tol)
+	X[:3, :3] = R
 
-    # Compute left Jacobian (could also be split into separate function)
-    theta = np.linalg.norm(w)
-    if theta < small_angle_tol:
-        Jl = np.eye(3)
-    else:
-        A = so3_wedge(w)
-        theta2 = theta * theta
-        oneMinusCosTheta2 = (1 - np.cos(theta)) / theta2
-        Jl = np.eye(3) + oneMinusCosTheta2 * A + ((theta - np.sin(theta)) / (theta2 * theta)) * A @ A
+	# Compute left Jacobian (could also be split into separate function)
+	theta = np.linalg.norm(w)
+	if theta < small_angle_tol:
+		Jl = np.eye(3)
+	else:
+		A = so3_wedge(w)
+		theta2 = theta * theta
+		oneMinusCosTheta2 = (1 - np.cos(theta)) / theta2
+		Jl = np.eye(3) + oneMinusCosTheta2 * A + ((theta - np.sin(theta)) / (theta2 * theta)) * A @ A
 
-    # Transform landmarks
-    for i in range(K):
-        v_segment = v[3 + 3*i : 3 + 3*i + 3]
-        X[:3, 3 + i] = Jl @ v_segment
+	# Transform landmarks
+	for i in range(K):
+		v_segment = v[3 + 3*i : 3 + 3*i + 3]
+		X[:3, 3 + i] = Jl @ v_segment
 
-    return X
+	return X
 
 
 def sek3_adjoint(X):
-    """ compute adjoint map for SE_K(3) """
-    K = X.shape[1] - 3
-    R = X[0:3, 0:3]
-    Adj = np.kron(np.eye(K + 1), R) # Initialize block diagonal of R matrices
-    for i in range(K):
-        Adj[3+3*i:3+3*i+3, 0:3] = so3_wedge(X[0:3, 3+i]) @ R
-        
-    return Adj
+	""" compute adjoint map for SE_K(3) """
+	K = X.shape[1] - 3
+	R = X[0:3, 0:3]
+	Adj = np.kron(np.eye(K + 1), R) # Initialize block diagonal of R matrices
+	for i in range(K):
+		Adj[3+3*i:3+3*i+3, 0:3] = so3_wedge(X[0:3, 3+i]) @ R
+		
+	return Adj
 
 
 class Observation:
@@ -110,6 +110,140 @@ class RobotState:
 	def set_state(self, R, v, p): self.set_rotation(R); self.set_velocity(v); self.set_position(p)
 
 
+class LandmarkManager:
+	def __init__(self, prior_landmarks, Ql):
+		self.prior_landmarks = prior_landmarks
+		self.estimated_landmarks = {}
+		self.Ql = Ql
+
+	def process_measurements(self, measurements, current_state):
+		"""
+		Takes raw measurements and current state
+		Returns: 
+		- Observation object ready for IEKF correct() if measurements exist
+		- List of new landmarks to add
+		- None, None if no valid measurements
+		"""
+		R = current_state.get_rotation()
+		Y, b, H, N, PI = [], [], [], [], np.array([]).reshape(0,0)
+		new_landmarks = []
+		used_landmarks = {}
+
+		for (ld_id, ld_pos) in measurements:
+			if ld_id in used_landmarks:
+				continue
+				
+			used_landmarks[ld_id] = 1
+			prior_pos = self.prior_landmarks.get(ld_id)
+			estimated_idx = estimated_landmarks.get(ld_id)
+
+			if prior_pos is not None:
+				dim_X = current_state.X.shape[0]
+				dim_P = current_state.P_.shape[0]
+
+				# update Y
+				Y_new = np.zeros(dim_X)
+				Y_new[:3] = ld_pos
+				Y_new[4] = 1
+				Y.append(Y_new)
+
+				# update b
+				b_new = np.zeros(dim_X)
+				b_new[:3] = prior_pos
+				b_new[4] = 1
+				b.append(b_new)
+
+				# update H
+				H_new = np.zeros((3, dim_P))
+				H_new[:3, :3] = so3_wedge(prior_pos.ravel())
+				H_new[:3, 6:9] = -np.eye(3)
+				H.append(H_new)
+
+				# update N
+				N_new = R @ Ql @ R.T
+				N = block_diag(N, N_new) if len(N) > 0 else N_new
+
+				# Update PI
+				PI_new = np.zeros((3, dim_X))
+				PI_new[:3, :3] = np.eye(3)
+				PI = block_diag(PI, PI_new) if len(PI) > 0 else PI_new
+
+			elif estimated_idx:
+				dim_X = current_state.X.shape[0]
+				dim_P = current_state.P_.shape[0]
+
+				# update Y
+				Y_new = np.zeros(dim_X)
+				Y_new[:3] = ld_pos
+				Y_new[4] = 1
+				Y_new[estimated_idx] = -1
+				Y.append(Y_new)
+
+				# update b
+				b_new = np.zeros(dim_X)
+				b_new[4] = 1
+				b_new[estimated_idx] = -1
+				b.append(b_new)
+
+				# update H
+				H_new = np.zeros((3, dim_P))
+				H_new[:3, 6:9] = -np.eye(3)
+				H_new[:3, 3*estimated_idx-6:3*estimated_idx-3] = np.eye(3)
+				H.append(H_new)
+
+				# update N
+				N_new = R @ Ql @ R.T
+				N = block_diag(N, N_new) if len(N) > 0 else N_new
+
+				# Update PI
+				PI_new = np.zeros((3, dim_X))
+				PI_new[:3, :3] = np.eye(3)
+				PI = block_diag(PI, PI_new) if len(PI) > 0 else PI_new
+
+			else:
+				new_landmarks.append((ld_id, ld_pos))
+
+		if len(Y) > 0:
+			return Observation(Y, b, H, N, PI), new_landmarks
+
+		return None, None
+
+	def add_new_landmarks(self, landmarks, current_state):
+		"""
+		Handles state augmentation for new landmarks
+		Returns updated state and covariance
+		"""
+		X_aug = current_state.X
+		P_aug = current_state.P_
+		p = current_state.get_position()
+
+		for (ld_id, ld_pos) in landmarks:
+			dim_P = current_state.P_.shape[0]
+			dim_theta = current_state.Theta_.shape[0]
+
+			# Initialize new landmark mean
+			startIndex = X_aug.shape[0]
+			X_aug = np.pad(X_aug, ((0,1), (0,1)))
+			X_aug[startIndex, startIndex] = 1
+			X_aug[:3, startIndex] = p + R @ ld_pos
+
+			# Initialize new landmark covariance
+			F = np.zeros((dim_P + 3, dim_P))
+			F[:dim_P-dim_theta, :dim_P-dim_theta] = np.eye(dim_P-dim_theta)
+			F[dim_P-dim_theta:dim_P-dim_theta+3, 6:9] = np.eye(3)
+			F[dim_P-dim_theta+3:, dim_P-dim_theta:] = np.eye(dim_theta)
+
+			G = np.zeros((F.shape[0], 3))
+			G[-dim_theta-3:-dim_theta, :] = R
+
+			P_aug = F @ P_aug @ F.T + G @ Ql @ G.T
+
+			# Add to estimated landmarks
+			estimated_landmarks[ld_id] = startIndex
+
+			# Update state and covariance
+			return X_aug, P_aug
+
 
 # Create all covariance matrices, with noise values to match C++
 gyro_std = 0.01  # Gyroscope noise
@@ -139,6 +273,7 @@ lm1 = (1, np.array([0, -1, 0]))
 lm3 = (3, np.array([2, -1, 0.5]))
 known_landmarks = {lm1[0]: lm1[1], lm3[0]: lm3[1]}  # known landmarks
 estimated_landmarks = {} # estimated landmarks
+landmark_manager = LandmarkManager(known_landmarks, Ql)
 
 
 # Set rate to process data
@@ -174,7 +309,7 @@ with open(input_file, 'r') as f:
 				# Extract state
 				R, v, p = state.get_state()
 
-				# Strapdown IMU motion model
+				# Apply strapdown IMU motion model
 				phi = w * dt
 				R_pred = R @ so3_Exp(phi)
 				v_pred = v + (R @ a + g_)*dt
@@ -184,9 +319,7 @@ with open(input_file, 'r') as f:
 				state.set_state(R=R_pred, v=v_pred, p=p_pred)
 
 				# Linearize error dynamics
-				dim_X = X.shape[0]
-				dim_P = P_.shape[0]
-				dim_theta = state.Theta_.shape[0]
+				dim_X, dim_P, dim_theta = X.shape[0], P_.shape[0], state.Theta_.shape[0]
 
 				# Inertial terms
 				A = np.zeros_like(P_)
@@ -224,105 +357,22 @@ with open(input_file, 'r') as f:
 
 		elif splits[0] == 'LANDMARK':
 			t = float(splits[1])
+
 			measured_landmarks = []
 			for i in range(2, len(splits), 4):
 				idx = float(splits[i])
 				coords = np.array(splits[i+1:i+4], dtype='float')
 				measured_landmarks.append((idx, coords))
-			
-			################################
-			#  Start of Correct Landmarks  #
-			################################
 
-			R = state.get_rotation()
-			Y = [] # measurements
-			b = [] # expected measurements
-			H = [] # measurement jacobian -- how does measurement change if we perturb state?
-			N = [] # measurement noise cov
-			PI = np.array([]).reshape(0,0)
+			# Get observation from landmark manager
+			obs, new_landmarks = landmark_manager.process_measurements(measured_landmarks, state)
 
-			new_landmarks = []
-			used_landmarks = {}
+			if obs is not None:
 
-			for (ld_id, ld_pos) in measured_landmarks:
-				if ld_id in used_landmarks:
-					continue
-					
-				used_landmarks[ld_id] = 1
-				prior_pos = known_landmarks.get(ld_id)
-				estimated_idx = estimated_landmarks.get(ld_id)
-
-				if prior_pos is not None:
-					dim_X = state.X.shape[0]
-					dim_P = state.P_.shape[0]
-
-					# update Y
-					Y_new = np.zeros(dim_X)
-					Y_new[:3] = ld_pos
-					Y_new[4] = 1
-					Y.append(Y_new)
-
-					# update b
-					b_new = np.zeros(dim_X)
-					b_new[:3] = prior_pos
-					b_new[4] = 1
-					b.append(b_new)
-
-					# update H
-					H_new = np.zeros((3, dim_P))
-					H_new[:3, :3] = so3_wedge(prior_pos.ravel())
-					H_new[:3, 6:9] = -np.eye(3)
-					H.append(H_new)
-
-					# update N
-					N_new = R @ Ql @ R.T
-					N = block_diag(N, N_new) if len(N) > 0 else N_new
-
-					# Update PI
-					PI_new = np.zeros((3, dim_X))
-					PI_new[:3, :3] = np.eye(3)
-					PI = block_diag(PI, PI_new) if len(PI) > 0 else PI_new
-
-				elif estimated_idx:
-					dim_X = state.X.shape[0]
-					dim_P = state.P_.shape[0]
-
-					# update Y
-					Y_new = np.zeros(dim_X)
-					Y_new[:3] = ld_pos
-					Y_new[4] = 1
-					Y_new[estimated_idx] = -1
-					Y.append(Y_new)
-
-					# update b
-					b_new = np.zeros(dim_X)
-					b_new[4] = 1
-					b_new[estimated_idx] = -1
-					b.append(b_new)
-
-					# update H
-					H_new = np.zeros((3, dim_P))
-					H_new[:3, 6:9] = -np.eye(3)
-					H_new[:3, 3*estimated_idx-6:3*estimated_idx-3] = np.eye(3)
-					H.append(H_new)
-
-					# update N
-					N_new = R @ Ql @ R.T
-					N = block_diag(N, N_new) if len(N) > 0 else N_new
-
-					# Update PI
-					PI_new = np.zeros((3, dim_X))
-					PI_new[:3, :3] = np.eye(3)
-					PI = block_diag(PI, PI_new) if len(PI) > 0 else PI_new
-
-				else:
-					new_landmarks.append((ld_id, ld_pos))
-
-			if len(Y) > 0:
-				obs = Observation(Y, b, H, N, PI)
-				#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
+				##################################
 				#~ Start of Correction Function ~#
-				#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
+				##################################
+
 				P = state.P_
 				PHT = P @ obs.H.T
 
@@ -350,48 +400,14 @@ with open(input_file, 'r') as f:
 				P_new = IKH @ P @ IKH.T + K @ obs.N @ K.T
 
 				state.P_ = P_new
-				#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
+
+				##################################
 				#~  End of Correction Function  ~#
-				#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
+				##################################
 
-			# Add new landmarks to state matrix
+			# Handle new landmarks if any
 			if new_landmarks:
-
-				X_aug = state.X
-				P_aug = state.P_
-				p = state.get_position()
-
-				for (ld_id, ld_pos) in new_landmarks:
-					dim_P = state.P_.shape[0]
-					dim_theta = state.Theta_.shape[0]
-
-					# Initialize new landmark mean
-					startIndex = X_aug.shape[0]
-					X_aug = np.pad(X_aug, ((0,1), (0,1)))
-					X_aug[startIndex, startIndex] = 1
-					X_aug[:3, startIndex] = p + R @ ld_pos
-
-					# Initialize new landmark covariance
-					F = np.zeros((dim_P + 3, dim_P))
-					F[:dim_P-dim_theta, :dim_P-dim_theta] = np.eye(dim_P-dim_theta)
-					F[dim_P-dim_theta:dim_P-dim_theta+3, 6:9] = np.eye(3)
-					F[dim_P-dim_theta+3:, dim_P-dim_theta:] = np.eye(dim_theta)
-
-					G = np.zeros((F.shape[0], 3))
-					G[-dim_theta-3:-dim_theta, :] = R
-
-					P_aug = F @ P_aug @ F.T + G @ Ql @ G.T
-
-					# Update state and covariance
-					state.X = X_aug
-					state.P_ = P_aug
-
-					# Add to estimated landmarks
-					estimated_landmarks[ld_id] = startIndex
-
-			################################
- 			#   End of Correct Landmarks   #
-			################################
+				state.X, state.P_ = landmark_manager.add_new_landmarks(new_landmarks, state)
 			
 			logger.log_flat(t, state, estimated_landmarks)
 
@@ -399,4 +415,4 @@ with open(input_file, 'r') as f:
 		imu_measurement_prev = imu_measurement
 
 logger.save()
-run_tests()
+run_tests() 
