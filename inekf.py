@@ -194,8 +194,6 @@ class IEKFFilter:
 		Theta_new = self.state.Theta_ + dTheta
 		self.state.X = X_new
 		self.state.Theta_ = Theta_new
-		self.state.gyroscope_bias = Theta_new[:3].flatten()  
-		self.state.accelerometer_bias = Theta_new[3:].flatten()
 
 		# Update Covariance (Joseph form)
 		IKH = np.eye(self.state.P_.shape[0]) - K @ obs.H
@@ -377,7 +375,7 @@ with open(input_file, 'r') as f:
 			dt = t - t_prev
 			if (dt > dt_min and dt < dt_max):
 				iekf_filter.propogate(imu_measurement_prev, dt)
-				logger.log_state(t, iekf_filter)
+				logger.log_filter(t, iekf_filter)
 
 		elif splits[0] == 'LANDMARK':
 			t = float(splits[1])
@@ -387,7 +385,7 @@ with open(input_file, 'r') as f:
 				coords = np.array(splits[i+1:i+4], dtype='float')
 				measured_landmarks.append((idx, coords))
 			iekf_filter.correct_landmarks(measured_landmarks)
-			logger.log_state(t, iekf_filter)
+			logger.log_filter(t, iekf_filter)
 
 		t_prev = t
 		imu_measurement_prev = imu_measurement
