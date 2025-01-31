@@ -1,4 +1,4 @@
-[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/USERNAME/REPO/blob/main/NOTEBOOK.ipynb)
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/mkielo3/inekf_demo/blob/main/demo.ipynb)
 
 Single file implementation of the Landmark example of https://github.com/RossHartley/invariant-ekf in Python.
 
